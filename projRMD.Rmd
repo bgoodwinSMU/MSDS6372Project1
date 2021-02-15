@@ -19,6 +19,10 @@ library(olsrr)
 library(fmsb)
 library(corrplot)
 library(RColorBrewer)
+library(funModeling)
+library(tidyverse)
+library(Hmisc)
+library(kableExtra)
 
 ```
 
@@ -39,6 +43,7 @@ vis_miss(proj1Dat)
 
 #Make df to work with, so orginal data is untouched
 carDat <- proj1Dat
+carDat$MSRP <- log(carDat$MSRP)
 
 #Examine data
 #View(proj1Dat)
@@ -76,18 +81,15 @@ carDat[c(5826,5831,5832,5840,5841),5] <- 301
 carDat[c(6909,6911,6917,6919),5] <- 305
 
 #Convert to factors
-carDat$Engine.Cylinders <- as.factor(carDat$Engine.Cylinders)
-#carDat$Engine.HP <- as.factor(carDat$Engine.HP)
-
 carDat$Make <- as.factor(carDat$Make)
 carDat$Year <- as.factor(carDat$Year)
 carDat$Engine.Fuel.Type <- as.factor(carDat$Engine.Fuel.Type)
 carDat$Transmission.Type <- as.factor(carDat$Transmission.Type)
-carDat$Driven_Wheels <- as.factor(carDat$Driven_Wheels)
 carDat$Number.of.Doors <- as.factor(carDat$Number.of.Doors)
 carDat$Market.Category <- as.factor(carDat$Market.Category)
 carDat$Vehicle.Size <- as.factor(carDat$Vehicle.Size)
 carDat$Vehicle.Style <- as.factor(carDat$Vehicle.Style)
+
 
 
 #Look at missing data 
@@ -161,6 +163,31 @@ ggplot(carDat, aes(x=(Popularity))) +
  geom_density(alpha=.2, fill="#FF6666") 
 
 
+M <-cor(carDat[,c(5,6,13,14,15,16)])
+corrplot(M, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+
+plotmatrix((carDat[,c(5,6,13,14,15,16)]))
+ggpairs(carDat[,c(5,6,13,14,15,16)])
+plot_num(carDat)
+
+
+ggplot(carDat, aes(x=Engine.HP, y=MSRP)) + 
+  geom_point()+
+  geom_smooth(method = "lm")
+
+ggplot(carDat, aes(x=Popularity, y=MSRP)) + 
+  geom_point()+
+  geom_smooth()
+
+ggplot(carDat, aes(x=Vehicle.Style, y=MSRP)) + 
+  geom_point()+
+  geom_smooth() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggplot(carDat, aes(x=Engine.Cylinders, y=MSRP)) + 
+  geom_point()+
+  geom_smooth() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
 
 
 
@@ -169,46 +196,171 @@ ggplot(carDat, aes(x=(Popularity))) +
 ```{r}
 #Model Selection
 
-# Loading the library
-library(glmnet)
+reg.fwd=regsubsets(MSRP~.,data=train,method="forward",nvmax=15)
+bics<-summary(reg.fwd)$bic
+plot(bics,type="l",ylab="BIC",xlab="# of predictors")
+
+reg.fwd$nbest
+
+regfwdMdl <- lm(MSRP~.,data=train)
+summary(regfwdMdl)
+
+reg.bwd=regsubsets(MSRP~.,data=train,method="backward",nvmax=15)
+bics<-summary(reg.bwd)$bic
+
+
+# Adjr2
+adjr2<-summary(reg.fwd)$adjr2
+plot(adjr2,type="l",ylab="Adjusted R-squared",xlab="# of predictors")
+
  
-x_vars <- model.matrix(Popularity~. , carDat)[,-15]
-y_var <- carDat$Popularity
-lambda_seq <- 10^seq(2, -2, by = -.1)
+MallowCP <- summary(reg.fwd)$cp
+plot(MallowCP,type="l",ylab="Mallow's CP",xlab="# of predictors")
+
+
+
+##Human model:
+
+edaModel <- lm(MSRP~Engine.HP+Vehicle.Style+Engine.Cylinders,data=carDat)
+summary(edaModel)
+
+ols_plot_resid_fit(edaModel)
+ols_plot_resid_lev(edaModel)
+ols_plot_resid_qq(edaModel)
+ols_plot_resid_hist(edaModel)
+ols_plot_cooksd_bar(edaModel)
+
+p <- predict(edaModel, cvr)
+error <- (p- cvr$MSRP)
+RMSE_Model <- sqrt(mean(error^2))
+
+ptest <- predict(edaModel, test)
+error1 <- (ptest- cvr$MSRP)
+RMSE_NewData <- sqrt(mean(error1^2))
+Method <- c("Train/Test Split")
+ModelRMSE <- c(RMSE_Model)
+RMSENewData <- c(RMSE_NewData)
+
+table1 <- data.frame(Method, ModelRMSE, RMSENewData)
+
+kable(table1) %>% kable_styling(c("striped", "bordered")) %>%column_spec(2:3, border_left = T)
+
+
+#Full model
+fullModel <- lm(MSRP~.,data = carDat)
+summary(fullModel)
+ols_plot_resid_fit(fullModel)
+ols_plot_resid_lev(fullModel)
+ols_plot_resid_qq(fullModel)
+ols_plot_resid_hist(fullModel)
+ols_plot_cooksd_bar(fullModel)
+
+p <- predict(fullModel, test)
+error <- (p- test$MSRP)
+RMSE_Model <- sqrt(mean(error^2))
+
+ptest <- predict(fullModel, test)
+error1 <- (ptest- carDat$MSRP)
+RMSE_NewData <- sqrt(mean(error1^2))
+Method <- c("Train/Test Split")
+ModelRMSE <- c(RMSE_Model)
+RMSENewData <- c(RMSE_NewData)
+
+table1 <- data.frame(Method, ModelRMSE, RMSENewData)
+
+kable(table1) %>% kable_styling(c("striped", "bordered")) %>%column_spec(2:3, border_left = T)
+
+
+
+# Set number of times you would like to repeat the sampling/testing 
+iterations = 1:100
  
-# Splitting the data into test and train
-set.seed(86)
-train = sample(1:nrow(x_vars), nrow(x_vars)/2)
-x_test = (-train)
-y_test = y_var[x_test]
+# the initial values for the columns (might not need these now that ive switched to building columns) 
+rmseSimple = c()
+rmseComplex = c()
  
-cv_output <- cv.glmnet(x_vars[train,], y_var[train],
-                       alpha = 1, lambda = lambda_seq, 
-                       nfolds = 5)
  
-# identifying best lamda
-best_lam <- cv_output$lambda.min
-best_lam
+# Start of Loop
+for(i in iterations){
+  # Resets sample every iteration 
+  index<- sample(1:dim(carDat)[1],128,replace=F)
+  train<- carDat[index,]
+  test<- carDat[-index,]
+  
+ 
+  # the model runs 
+  edaModel 
+  
+  fullModel 
+  
+  
+  # predictors and column building
+  predictions1 <- edaModel %>% predict(test)
+  
+  d1 = data.frame(R2 = R2(predictions1,test$MSRP),
+                  RMSE = RMSE(predictions1,test$MSRP), MAE = MAE(predictions1, test$MSRP))
+  rmseSimple = c(rmseSimple,d1$RMSE)
+  
+  predictions2 <- fullModel %>% predict(test)
+ 
+  d2 = data.frame(R2 = R2(predictions2,test$MSRP),
+                RMSE = RMSE(predictions2,test$MSRP), MAE = MAE(predictions2, test$MSRP))
+  rmseComplex = c(rmseComplex, d2$RMSE)
+  
+ 
+  # End for
+}
 
-# Rebuilding the model with best lamda value identified
-lasso_best <- glmnet(x_vars[train,], y_var[train], alpha = 1, lambda = best_lam)
-pred <- predict(lasso_best, s = best_lam, newx = x_vars[x_test,])
-
-final <- cbind(y_var[train], pred)
-# Checking the first six obs
-head(final)
-
-
-sort(coef(lasso_best))
+# putting the dataframe together and outputting relevant statistics
+Model.Average.RMSE = cbind(rmseSimple, rmseComplex)
+rmsedf = as.data.frame(Model.Average.RMSE)
+Means = colMeans(Model.Average.RMSE)
+SDs = round(colSds(Model.Average.RMSE), 3)
+range1 = max(rmsedf$rmseSimple) - min(rmsedf$rmseSimple)
+range2 = max(rmsedf$rmseComplex) - min(rmsedf$rmseComplex)
+rmsedf1 = melt(rmsedf,rmse = c("n", "rmse"))
 
 
-model <- lm(Popularity~.,data = carDat)
-k <- ols_step_best_subset(model)
+
+summary(Model.Average.RMSE)
+
+
+
+
+Pred1 <- data.frame(Value = predictions1, Model = "Simple")
+Pred2 <- data.frame(Value = predictions2, Model = "Complex")
+PredActual <- data.frame(ActualValue = test$MSRP)
+PredAll <- rbind(Pred1, Pred2)
+PredActual <- rbind(PredActual,PredActual)
+PredAll <- cbind(PredAll, PredActual)
+PredAll %>% ggplot(aes(x = Value, y = ActualValue, fill = Model)) + geom_point(aes(color = Model)) + geom_smooth(formula = y~x)+theme_minimal()
+ 
+# Column
+rmsedf1 %>% group_by(variable) %>% summarise(mean = (mean(value))) %>% 
+  ggplot(aes(x = reorder(variable, -mean), y = mean, fill = variable)) + geom_col(width = 0.75) + geom_text(aes(label = round(mean,3), vjust = -0.5)) + 
+  ggtitle("Average RMSE over 100 Shuffles (Linear Models)") + xlab("Model #") + ylab("Mean RMSE")+theme_minimal()
+ 
+# Boxplot
+rmsedf1 %>%  ggplot(aes(x = variable, y = value)) + geom_boxplot(aes(fill = variable)) + facet_wrap(~variable,ncol = TRUE) +
+  ggtitle("Mean RMSE Distribution by Model") + ylab("Mean RMSE") + coord_flip() + 
+  theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+# Histogram
+rmsedf1 %>%  ggplot(aes(x = value)) + geom_histogram(aes(fill = variable)) + facet_wrap(~variable,ncol = TRUE) +
+  ggtitle("Mean RMSE Distribution by Model") + xlab("Mean RMSE") + 
+  theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
+ 
+# Here we can see there is no significant difference between the models in terms of RMSE
+t.test(rmseSimple,rmseComplex, var.equal = FALSE)
+
+
+
+
 
 
 
 
 ```
+
 
 
 
@@ -226,4 +378,34 @@ The training data set can be used for EDA and model fitting while the test set c
 EDA, EDA, EDA!  It helps you on so many fronts so use it to your advantage.  When writing a concise report, you do not have to literally step out every single step of your model building process.  I know you guys are going to being iterating on things many many times.  That does not all have to be there.  You can summarize that iteration stuff in a paragraph.  
 
 What is key in the report is that you develop a “story” of your analysis.  Keep in mind that when you are finished with your analysis.  You know how it is going to end (what the final models look like).  You can use this to your advantage when selecting what parts of the EDA and additional information to show.  For example, if you know that predictor X7 is in your final model and it is one of the stronger relationships, that is probably a good one to show and discuss in the EDA part.  You would show the reader, “Hey look at these interesting trends”, “Hey look at these that are not”, etc.  When you report your final model and you are bringing back up the predictors discussed in EDA, it helps build the confidence of the reader in what you are doing is making sense.
+
+```{r}
+#Objective 2
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3333)
+knn_fit <- train(MSRP ~., data = train[,c(5,6,13,14,15,16)], method = "knn",
+ trControl=trctrl,
+ preProcess = c("center", "scale"),
+ tuneLength = 10)
+
+(knn_fit)
+
+
+test_pred <- predict(knn_fit, newdata = test)
+test_pred
+
+plot(knn_fit)
+plot(knn_fit, print.thres = 0.5, type="S")
+
+
+set.seed(400)
+ctrl <- trainControl(method="repeatedcv",repeats = 3) #,classProbs=TRUE,summaryFunction = twoClassSummary)
+
+# Random forrest
+rfFit <- train(MSRP ~ ., data = train[,c(5,6,13,14,15,16)], method = "rf", trControl = ctrl, preProcess = c("center","scale"), tuneLength = 20)
+
+rfFit
+plot(rfFit)
+```
+
 
