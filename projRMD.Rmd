@@ -13,8 +13,12 @@ editor_options:
 library(naniar)
 library(caret)
 library(ggplot2)
-
-
+library(mlbench)
+library(glmnet)
+library(olsrr)
+library(fmsb)
+library(corrplot)
+library(RColorBrewer)
 
 ```
 
@@ -30,6 +34,8 @@ Objective 1: Display the ability to build regression models using the skills and
 ```{r}
 #Read in the data file
 proj1Dat <- read.csv("data1.csv")
+
+vis_miss(proj1Dat)
 
 #Make df to work with, so orginal data is untouched
 carDat <- proj1Dat
@@ -57,9 +63,21 @@ carDat[c(8696:8698),6] <- 2
 #And fix 8699-8715 with 4 cylinders
 carDat[c(8699:8715),6] <- 4
 
+#And fix 4204-4207 with 168
+carDat[c(4204:4207),5] <- 168
+
+#And fix 4915-4920 with 193
+carDat[c(4915:4920),5] <- 193
+
+#And fix 5826,5831,5832,5834,5840,5841 with 301
+carDat[c(5826,5831,5832,5840,5841),5] <- 301
+
+#And fix 6909, 6911, 6917,6919 with 305
+carDat[c(6909,6911,6917,6919),5] <- 305
+
 #Convert to factors
 carDat$Engine.Cylinders <- as.factor(carDat$Engine.Cylinders)
-carDat$Engine.HP <- as.factor(carDat$Engine.HP)
+#carDat$Engine.HP <- as.factor(carDat$Engine.HP)
 
 carDat$Make <- as.factor(carDat$Make)
 carDat$Year <- as.factor(carDat$Year)
@@ -75,20 +93,15 @@ carDat$Vehicle.Style <- as.factor(carDat$Vehicle.Style)
 #Look at missing data 
 vis_miss(carDat)
 #Looks good
+```
 
-
+# Split up data into 80% training, 10% testing, and 10% validation
+```{r}
 #time to split up the data .8 train, .1 test, .1 validate
 ss <- sample(1:3,size=nrow(carDat),replace=TRUE,prob=c(0.8,0.1,0.1))
 train <- carDat[ss==1,]
 test <- carDat[ss==2,]
 cvr <- carDat[ss==3,]
-
-
-```
-
-# Split up data into 80% training, 10% testing, and 10% validation
-```{r}
-
 ```
 
 
@@ -98,6 +111,107 @@ cvr <- carDat[ss==3,]
 ## Objective 1.1
 
 Build a model with the main goal to identify key relationships and is highly interpretable.  Provide detailed information on summary statistics, EDA, and your model building process. 
+
+```{r}
+
+#Summary Statistics 
+mean(carDat$Popularity)
+min(carDat$Popularity)
+max(carDat$Popularity)
+sd(carDat$Popularity)
+
+#General summary stats
+summary(carDat)
+summary(proj1Dat)
+
+#Summary of vehicle style
+summary(carDat$Vehicle.Style)
+plot(carDat$Vehicle.Style)
+
+
+p <- ggplot(carDat, aes(fill=Popularity, y=Vehicle.Style, x=MSRP)) + 
+    geom_bar(position="dodge", stat="identity")
+p + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#EDA
+ggplot(carDat, aes(x = MSRP, y = Popularity,color=Vehicle.Style)) 
+  geom_point()
+
+ggplot(data = carDat, mapping = aes(x = MSRP, y = Popularity)) +
+    geom_point() +
+    geom_smooth(aes(color = Vehicle.Style)) +
+    facet_wrap( ~Vehicle.Style)
+
+
+
+#Histogram of MSRP
+ggplot(carDat, aes(x=(MSRP))) + 
+ geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="#FF6666") 
+
+#Log transformed history of MSRP
+ggplot(carDat, aes(x=log(MSRP))) + 
+ geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="#FF6666") 
+
+
+#Histogram of popularity
+ggplot(carDat, aes(x=(Popularity))) + 
+ geom_histogram(aes(y=..density..), colour="black", fill="white")+
+ geom_density(alpha=.2, fill="#FF6666") 
+
+
+
+
+
+
+```
+```{r}
+#Model Selection
+
+# Loading the library
+library(glmnet)
+ 
+x_vars <- model.matrix(Popularity~. , carDat)[,-15]
+y_var <- carDat$Popularity
+lambda_seq <- 10^seq(2, -2, by = -.1)
+ 
+# Splitting the data into test and train
+set.seed(86)
+train = sample(1:nrow(x_vars), nrow(x_vars)/2)
+x_test = (-train)
+y_test = y_var[x_test]
+ 
+cv_output <- cv.glmnet(x_vars[train,], y_var[train],
+                       alpha = 1, lambda = lambda_seq, 
+                       nfolds = 5)
+ 
+# identifying best lamda
+best_lam <- cv_output$lambda.min
+best_lam
+
+# Rebuilding the model with best lamda value identified
+lasso_best <- glmnet(x_vars[train,], y_var[train], alpha = 1, lambda = best_lam)
+pred <- predict(lasso_best, s = best_lam, newx = x_vars[x_test,])
+
+final <- cbind(y_var[train], pred)
+# Checking the first six obs
+head(final)
+
+
+sort(coef(lasso_best))
+
+
+model <- lm(Popularity~.,data = carDat)
+k <- ols_step_best_subset(model)
+
+
+
+
+```
+
+
+
 
 ## Objective 1.2
 
